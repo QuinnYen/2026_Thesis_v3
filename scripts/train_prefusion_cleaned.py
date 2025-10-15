@@ -91,6 +91,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         loss = criterion(logits, labels)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         total_loss += loss.item()
@@ -320,17 +321,11 @@ def train_model(num_layers, train_loader, val_loader, class_weights, device, bas
         epoch_time = time.time() - epoch_start
 
         # 更新 epoch 進度條
-        epoch_pbar.set_postfix({
+        postfix = {
             'Loss': f'{val_loss:.4f}',
             'Acc': f'{val_acc:.4f}',
             'F1': f'{val_f1:.4f}'
-        })
-
-        # 使用 tqdm.write() 避免打斷進度條
-        tqdm.write(f"\nEpoch {epoch}/{CONFIG['num_epochs']} ({epoch_time:.2f}s)")
-        tqdm.write(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-        tqdm.write(f"  Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
-        tqdm.write(f"  Val   P: {val_precision:.4f} | R: {val_recall:.4f} | F1: {val_f1:.4f}")
+        }
 
         if val_f1 > best_f1:
             best_f1 = val_f1
@@ -343,15 +338,14 @@ def train_model(num_layers, train_loader, val_loader, class_weights, device, bas
                 'val_acc': val_acc,
                 'config': CONFIG
             }, CHECKPOINT_DIR / 'best_model.pt')
-            tqdm.write(f"  [新最佳模型] F1: {val_f1:.4f} (已儲存)")
+            postfix['Best'] = '✓'
+
+        epoch_pbar.set_postfix(postfix)
 
         if early_stopping(val_f1):
-            tqdm.write(f"\nEarly stopping triggered at epoch {epoch}")
             break
 
     total_time = time.time() - start_time
-    tqdm.write(f"\n訓練完成！總時間: {total_time:.2f}s")
-    tqdm.write(f"最佳 Epoch: {best_epoch} | 最佳 F1: {best_f1:.4f}")
 
     # 載入最佳模型並評估
     checkpoint = torch.load(CHECKPOINT_DIR / 'best_model.pt')

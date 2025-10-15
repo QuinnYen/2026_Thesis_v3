@@ -168,6 +168,23 @@ def step4_generate_report():
     """步驟 4：產生完整實驗報告（包含所有數據集）"""
     print_section("步驟 4/4：產生完整實驗報告")
 
+    # 使用獨立的報告生成腳本
+    success = run_command(
+        "生成完整實驗報告（包含所有數據集）",
+        ["python", "scripts/generate_report.py"],
+        timeout=120
+    )
+
+    if not success:
+        print("\n[錯誤] 報告生成失敗")
+        return False
+
+    return True
+
+def step4_generate_report_old():
+    """步驟 4：產生完整實驗報告（包含所有數據集）- 舊版本"""
+    print_section("步驟 4/4：產生完整實驗報告")
+
     report_lines = []
     report_lines.append("=" * 80)
     report_lines.append("完整實驗報告")
@@ -245,20 +262,23 @@ def step4_generate_report():
 
         for i, model in enumerate(models_found, 1):
             rank_marker = "⭐" if i == 1 else f"{i}."
+            # 格式化參數量（處理 N/A 或數字）
+            params_str = f"{model['params']:,}" if isinstance(model['params'], int) else str(model['params'])
             report_lines.append(
                 f"{rank_marker:<6} {model['name']:<20} "
                 f"{model['accuracy']:<12.4f} {model['f1']:<12.4f} "
-                f"{model['params']:,}"
+                f"{params_str:<15}"
             )
 
         report_lines.append("-" * 80)
 
         # 最佳模型
         best = models_found[0]
+        best_params_str = f"{best['params']:,}" if isinstance(best['params'], int) else str(best['params'])
         report_lines.append(f"\n🏆 最佳模型：{best['name']}")
         report_lines.append(f"   - Accuracy: {best['accuracy']:.4f}")
         report_lines.append(f"   - Macro-F1: {best['f1']:.4f}")
-        report_lines.append(f"   - 參數量: {best['params']:,}")
+        report_lines.append(f"   - 參數量: {best_params_str}")
 
     # 輸出位置
     report_lines.append("\n\n" + "=" * 80)

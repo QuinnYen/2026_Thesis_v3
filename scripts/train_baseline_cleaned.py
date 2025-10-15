@@ -90,6 +90,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
         loss = criterion(logits, labels)
 
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
         total_loss += loss.item()
@@ -313,16 +314,11 @@ def main():
         epoch_time = time.time() - epoch_start
 
         # 更新進度條
-        epoch_pbar.set_postfix({
+        postfix = {
             'Loss': f'{val_loss:.4f}',
             'Acc': f'{val_acc:.4f}',
             'F1': f'{val_f1:.4f}'
-        })
-
-        tqdm.write(f"\nEpoch {epoch}/{num_epochs} ({epoch_time:.2f}s)")
-        tqdm.write(f"  Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-        tqdm.write(f"  Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.4f}")
-        tqdm.write(f"  Val   P: {val_precision:.4f} | R: {val_recall:.4f} | F1: {val_f1:.4f}")
+        }
 
         # 儲存最佳模型
         if val_f1 > best_f1:
@@ -338,16 +334,15 @@ def main():
                 'val_acc': val_acc,
             }, best_model_path)
 
-            tqdm.write(f"  [新最佳模型] F1: {val_f1:.4f} (已儲存)")
+            postfix['Best'] = '✓'
+
+        epoch_pbar.set_postfix(postfix)
 
         # Early Stopping
         if early_stopping(val_f1):
-            tqdm.write(f"\nEarly stopping triggered at epoch {epoch}")
             break
 
     total_time = time.time() - start_time
-    tqdm.write(f"\n訓練完成！總時間: {total_time:.2f}s")
-    tqdm.write(f"最佳 Epoch: {best_epoch} | 最佳 F1: {best_f1:.4f}")
 
     # 載入最佳模型並最終評估
     print("\n" + "=" * 80)

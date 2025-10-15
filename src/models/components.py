@@ -153,12 +153,16 @@ class AttentionLayer(nn.Module):
         attention_scores = self.v(torch.tanh(self.W(lstm_outputs)))  # (batch_size, seq_len, 1)
         attention_scores = attention_scores.squeeze(-1)  # (batch_size, seq_len)
 
-        # 應用遮罩：將非面向詞位置的分數設為負無窮大
+        # 應用遮罩：將非面向詞位置的分數設為極小值（而非-inf以避免NaN）
         # 這樣 softmax 後這些位置的權重會接近 0
-        attention_scores = attention_scores.masked_fill(~aspect_mask, float('-inf'))
+        attention_scores = attention_scores.masked_fill(~aspect_mask, -1e9)
 
         # 計算注意力權重: α_i = softmax(e_i)
         attention_weights = F.softmax(attention_scores, dim=1)  # (batch_size, seq_len)
+
+        # 數值穩定性檢查：如果出現NaN，使用均勻分佈
+        if torch.isnan(attention_weights).any():
+            attention_weights = aspect_mask.float() / aspect_mask.sum(dim=1, keepdim=True).clamp(min=1)
 
         # 計算上下文向量: context = Σ(α_i * h_i)
         # attention_weights: (batch_size, seq_len) -> (batch_size, seq_len, 1)
