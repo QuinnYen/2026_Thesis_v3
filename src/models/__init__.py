@@ -6,10 +6,14 @@
 
 from .components import BiLSTMLayer, AttentionLayer, Classifier
 from .baseline import BaselineModel
+from .aspect_level import AspectLevelModel, AspectPositionEmbedding, AspectAwareAttention
 
 __all__ = [
     'BiLSTMLayer',
     'AttentionLayer',
     'Classifier',
-    'BaselineModel'
+    'BaselineModel',
+    'AspectLevelModel',
+    'AspectPositionEmbedding',
+    'AspectAwareAttention'
 ]

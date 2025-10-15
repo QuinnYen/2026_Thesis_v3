@@ -26,6 +26,13 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 
+# 匯入自定義 AUC 計算模組
+from .metrics import (
+    calculate_multiclass_auc,
+    calculate_roc_curves,
+    calculate_micro_auc
+)
+
 
 class ABSAEvaluator:
     """
@@ -73,9 +80,11 @@ class ABSAEvaluator:
         # 評估結果
         self.predictions = []
         self.true_labels = []
+        self.probabilities = []  # 新增：儲存預測機率用於 AUC 計算
         self.attention_weights = []
         self.input_ids = []
         self.metrics = {}
+        self.roc_data = {}  # 新增：儲存 ROC 曲線數據
 
         print(f"評估器初始化完成")
         print(f"  - 裝置: {self.device}")
@@ -97,6 +106,7 @@ class ABSAEvaluator:
         self.model.eval()
         self.predictions = []
         self.true_labels = []
+        self.probabilities = []  # 重置機率列表
         self.attention_weights = []
         self.input_ids = []
 
@@ -115,10 +125,13 @@ class ABSAEvaluator:
 
                 # 預測
                 predictions = torch.argmax(logits, dim=1)
+                # 計算機率（用於 AUC）
+                probabilities = torch.softmax(logits, dim=1)
 
                 # 記錄結果
                 self.predictions.extend(predictions.cpu().numpy())
                 self.true_labels.extend(labels.cpu().numpy())
+                self.probabilities.extend(probabilities.cpu().numpy())  # 記錄機率
                 self.attention_weights.extend(attn_weights.cpu().numpy())
                 self.input_ids.extend(input_ids.cpu().numpy())
 
@@ -159,6 +172,22 @@ class ABSAEvaluator:
             metrics[f'{class_name}_recall'] = recall_per_class[i]
             metrics[f'{class_name}_f1'] = f1_per_class[i]
 
+        # 計算 AUC 指標
+        if len(self.probabilities) > 0:
+            y_true = np.array(self.true_labels)
+            y_prob = np.array(self.probabilities)
+
+            # 計算 multiclass AUC
+            auc_scores = calculate_multiclass_auc(y_true, y_prob, self.class_names)
+            metrics.update(auc_scores)
+
+            # 計算 ROC 曲線數據（儲存供後續繪製）
+            self.roc_data = calculate_roc_curves(y_true, y_prob, self.class_names)
+
+            # 計算 micro-average AUC
+            micro_auc, _, _ = calculate_micro_auc(y_true, y_prob)
+            metrics['auc_micro'] = micro_auc
+
         return metrics
 
     def _print_metrics(self):
@@ -169,6 +198,17 @@ class ABSAEvaluator:
         print(f"  - Micro-F1: {self.metrics['micro_f1']:.4f}")
         print(f"  - Macro-Precision: {self.metrics['macro_precision']:.4f}")
         print(f"  - Macro-Recall: {self.metrics['macro_recall']:.4f}")
+
+        # 顯示 AUC 指標
+        if 'auc_macro' in self.metrics:
+            print(f"\nAUC 指標:")
+            print(f"  - Macro-AUC: {self.metrics['auc_macro']:.4f}")
+            if 'auc_micro' in self.metrics:
+                print(f"  - Micro-AUC: {self.metrics['auc_micro']:.4f}")
+            for class_name in self.class_names:
+                auc_key = f'auc_{class_name}'
+                if auc_key in self.metrics and not np.isnan(self.metrics[auc_key]):
+                    print(f"  - {class_name} AUC: {self.metrics[auc_key]:.4f}")
 
         print("\n每類別指標:")
         for class_name in self.class_names:
@@ -219,6 +259,68 @@ class ABSAEvaluator:
         save_path = self.save_dir / filename
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
         print(f"混淆矩陣已儲存: {save_path}")
+        plt.close()
+
+        return save_path
+
+    def plot_roc_curves(self) -> Path:
+        """
+        繪製 ROC 曲線（所有類別 + macro-average）
+
+        返回:
+            Path: 圖片儲存路徑
+        """
+        if not self.roc_data:
+            print("警告: 沒有 ROC 數據可繪製")
+            return None
+
+        # 建立圖形
+        plt.figure(figsize=(10, 8))
+
+        # 定義顏色
+        colors = ['blue', 'green', 'red', 'purple', 'orange', 'brown', 'pink']
+
+        # 繪製每個類別的 ROC 曲線
+        for idx, class_name in enumerate(self.class_names):
+            if class_name in self.roc_data:
+                data = self.roc_data[class_name]
+                plt.plot(
+                    data['fpr'],
+                    data['tpr'],
+                    color=colors[idx % len(colors)],
+                    lw=2,
+                    label=f'{class_name} (AUC = {data["auc"]:.4f})'
+                )
+
+        # 繪製 macro-average ROC 曲線
+        if 'macro' in self.roc_data:
+            data = self.roc_data['macro']
+            plt.plot(
+                data['fpr'],
+                data['tpr'],
+                color='black',
+                lw=3,
+                linestyle='--',
+                label=f'Macro-average (AUC = {data["auc"]:.4f})'
+            )
+
+        # 繪製對角線（隨機猜測）
+        plt.plot([0, 1], [0, 1], 'k--', lw=1, alpha=0.3, label='Random Guess')
+
+        # 設定圖形
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate (FPR)', fontsize=12)
+        plt.ylabel('True Positive Rate (TPR)', fontsize=12)
+        plt.title('ROC Curves (One-vs-Rest)', fontsize=14, pad=20)
+        plt.legend(loc="lower right", fontsize=10)
+        plt.grid(alpha=0.3)
+        plt.tight_layout()
+
+        # 儲存
+        save_path = self.save_dir / 'roc_curves.png'
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        print(f"ROC 曲線已儲存: {save_path}")
         plt.close()
 
         return save_path
@@ -520,7 +622,10 @@ class ABSAEvaluator:
         self.plot_confusion_matrix(normalize=False)
         self.plot_confusion_matrix(normalize=True)
 
-        # 3. 錯誤分析
+        # 3. 繪製 ROC 曲線
+        self.plot_roc_curves()
+
+        # 4. 錯誤分析
         errors_df = self.analyze_errors(vocab)
 
         # 4. 注意力視覺化（隨機選擇幾個樣本）
