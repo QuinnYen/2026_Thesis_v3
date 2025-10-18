@@ -53,7 +53,11 @@ class BaselineModel(nn.Module):
         num_classes=3,
         dropout=0.3,
         pretrained_embeddings=None,
-        freeze_embeddings=False
+        freeze_embeddings=False,
+        use_soft_mask=False,
+        penalty_weight=5.0,
+        context_window=2,
+        normalize_penalty=False
     ):
         super(BaselineModel, self).__init__()
 
@@ -82,8 +86,14 @@ class BaselineModel(nn.Module):
             dropout=0.0  # 單層 LSTM 不使用 dropout
         )
 
-        # 3. 注意力層
-        self.attention = AttentionLayer(hidden_size=hidden_size)
+        # 3. 注意力層（支持軟遮罩）
+        self.attention = AttentionLayer(
+            hidden_size=hidden_size,
+            use_soft_mask=use_soft_mask,
+            penalty_weight=penalty_weight,
+            context_window=context_window,
+            normalize_penalty=normalize_penalty
+        )
 
         # 4. 分類器
         self.classifier = Classifier(

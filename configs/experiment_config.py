@@ -52,6 +52,50 @@ BASELINE_CONFIG = {
     "max_length": 128,
     "dropout": 0.1,
     "weight_decay": 0.01,
+    # 軟遮罩配置（Soft Masking + Context Window）
+    "use_soft_mask": True,       # 啟用軟遮罩（False=硬遮罩）
+    "penalty_weight": 5.0,       # 距離懲罰強度（建議範圍: 3-10）
+    "context_window": 2,         # 上下文窗口大小（建議範圍: 1-4）
+    "normalize_penalty": True,   # 啟用懲罰歸一化（根據attention scores動態調整）
+}
+
+# 實驗用：不同的軟遮罩配置組合（供超參數搜索使用）
+SOFT_MASK_EXPERIMENTS = {
+    # 配置 1：硬遮罩（基線）
+    "hard_mask": {
+        "use_soft_mask": False,
+        "penalty_weight": 0.0,
+        "context_window": 0,
+        "normalize_penalty": False,
+    },
+    # 配置 2：軟遮罩 + 固定懲罰
+    "soft_mask_fixed": {
+        "use_soft_mask": True,
+        "penalty_weight": 5.0,
+        "context_window": 2,
+        "normalize_penalty": False,
+    },
+    # 配置 3：軟遮罩 + 歸一化懲罰（推薦）
+    "soft_mask_normalized": {
+        "use_soft_mask": True,
+        "penalty_weight": 5.0,
+        "context_window": 2,
+        "normalize_penalty": True,
+    },
+    # 配置 4：強懲罰 + 大窗口
+    "soft_mask_strong": {
+        "use_soft_mask": True,
+        "penalty_weight": 10.0,
+        "context_window": 3,
+        "normalize_penalty": True,
+    },
+    # 配置 5：弱懲罰 + 小窗口
+    "soft_mask_weak": {
+        "use_soft_mask": True,
+        "penalty_weight": 3.0,
+        "context_window": 1,
+        "normalize_penalty": True,
+    },
 }
 
 # Pre-Fusion 配置

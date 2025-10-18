@@ -113,11 +113,18 @@ class AttentionLayer(nn.Module):
         - attention_weights: (batch_size, seq_len)
     """
 
-    def __init__(self, hidden_size, attention_size=None):
+    def __init__(self, hidden_size, attention_size=None, use_soft_mask=False,
+                 penalty_weight=5.0, context_window=2, normalize_penalty=False):
         super(AttentionLayer, self).__init__()
 
         self.hidden_size = hidden_size * 2  # 雙向 LSTM 輸出維度
         self.attention_size = attention_size if attention_size is not None else hidden_size
+
+        # 軟遮罩參數
+        self.use_soft_mask = use_soft_mask  # 是否使用軟遮罩
+        self.penalty_weight = penalty_weight  # 距離懲罰強度
+        self.context_window = context_window  # 上下文窗口大小
+        self.normalize_penalty = normalize_penalty  # 是否歸一化懲罰
 
         # 注意力權重矩陣 W
         self.W = nn.Linear(self.hidden_size, self.attention_size, bias=True)
@@ -153,9 +160,25 @@ class AttentionLayer(nn.Module):
         attention_scores = self.v(torch.tanh(self.W(lstm_outputs)))  # (batch_size, seq_len, 1)
         attention_scores = attention_scores.squeeze(-1)  # (batch_size, seq_len)
 
-        # 應用遮罩：將非面向詞位置的分數設為極小值（而非-inf以避免NaN）
-        # 這樣 softmax 後這些位置的權重會接近 0
-        attention_scores = attention_scores.masked_fill(~aspect_mask, -1e9)
+        if self.use_soft_mask:
+            # 軟遮罩：使用距離衰減懲罰（向量化版本）
+            batch_size, seq_len = aspect_mask.shape
+            distances = self._compute_distances_vectorized(aspect_mask)
+
+            # 選擇是否歸一化懲罰
+            if self.normalize_penalty:
+                # 根據 attention_scores 的標準差來縮放懲罰
+                score_scale = attention_scores.std() + 1e-8
+                penalties = self.penalty_weight * score_scale * distances
+            else:
+                # 固定懲罰強度
+                penalties = self.penalty_weight * distances
+
+            attention_scores = attention_scores - penalties
+        else:
+            # 硬遮罩：將非面向詞位置的分數設為極小值（而非-inf以避免NaN）
+            # 這樣 softmax 後這些位置的權重會接近 0
+            attention_scores = attention_scores.masked_fill(~aspect_mask, -1e9)
 
         # 計算注意力權重: α_i = softmax(e_i)
         attention_weights = F.softmax(attention_scores, dim=1)  # (batch_size, seq_len)
@@ -173,6 +196,76 @@ class AttentionLayer(nn.Module):
         ).squeeze(1)  # (batch_size, hidden_size * 2)
 
         return attention_output, attention_weights
+
+    def _compute_distances_vectorized(self, aspect_mask):
+        """
+        向量化版本：計算每個token到最近aspect token的距離（用於軟遮罩）
+
+        結合上下文窗口：
+        - 窗口內：使用線性距離衰減
+        - 窗口外：使用更大懲罰（雙倍距離）
+
+        Args:
+            aspect_mask (Tensor): 形狀為 (batch_size, seq_len) 的布林遮罩
+
+        Returns:
+            distances (Tensor): 形狀為 (batch_size, seq_len) 的距離矩陣
+        """
+        batch_size, seq_len = aspect_mask.shape
+        device = aspect_mask.device
+
+        # 建立位置索引 (1, seq_len)
+        positions = torch.arange(seq_len, device=device, dtype=torch.float).unsqueeze(0)
+
+        # 初始化距離矩陣
+        distances = torch.zeros(batch_size, seq_len, device=device, dtype=torch.float)
+
+        for b in range(batch_size):
+            # 找到 aspect 位置
+            aspect_positions = positions[0][aspect_mask[b]]  # (num_aspects,)
+
+            if len(aspect_positions) == 0:
+                # 如果沒有aspect詞，所有位置都給予大懲罰
+                distances[b, :] = seq_len
+            else:
+                # 計算每個位置到所有 aspect 位置的距離
+                # aspect_positions: (num_aspects,) -> (num_aspects, 1)
+                # positions: (1, seq_len)
+                # pos_diff: (num_aspects, seq_len)
+                pos_diff = torch.abs(aspect_positions.unsqueeze(1) - positions)
+
+                # 取最小距離 (seq_len,)
+                min_dist, _ = pos_diff.min(dim=0)
+
+                # 應用上下文窗口策略
+                distances[b] = torch.where(
+                    min_dist <= self.context_window,
+                    min_dist,  # 窗口內：線性距離
+                    min_dist * 2.0  # 窗口外：雙倍懲罰
+                )
+
+                # aspect 詞本身距離為 0
+                distances[b][aspect_mask[b]] = 0.0
+
+        return distances
+
+    def _compute_distances(self, aspect_mask):
+        """
+        原始版本：計算每個token到最近aspect token的距離（用於軟遮罩）
+        保留此函數以供向後相容，但建議使用 _compute_distances_vectorized
+
+        結合上下文窗口：
+        - 窗口內：使用線性距離衰減
+        - 窗口外：使用更大懲罰（雙倍距離）
+
+        Args:
+            aspect_mask (Tensor): 形狀為 (batch_size, seq_len) 的布林遮罩
+
+        Returns:
+            distances (Tensor): 形狀為 (batch_size, seq_len) 的距離矩陣
+        """
+        # 直接呼叫向量化版本
+        return self._compute_distances_vectorized(aspect_mask)
 
 
 class Classifier(nn.Module):

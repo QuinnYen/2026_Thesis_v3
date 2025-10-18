@@ -255,7 +255,12 @@ def main():
         num_classes=3,
         dropout=BASELINE_CONFIG.get('dropout', 0.3),
         pretrained_embeddings=None,
-        freeze_embeddings=False
+        freeze_embeddings=False,
+        # 軟遮罩配置
+        use_soft_mask=BASELINE_CONFIG.get('use_soft_mask', False),
+        penalty_weight=BASELINE_CONFIG.get('penalty_weight', 5.0),
+        context_window=BASELINE_CONFIG.get('context_window', 2),
+        normalize_penalty=BASELINE_CONFIG.get('normalize_penalty', False)
     )
 
     model = model.to(device)
