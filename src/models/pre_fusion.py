@@ -1,11 +1,17 @@
 """
-前融合架構（Pre-Fusion）模型
+前融合架構（Pre-Fusion）模型 - 改進版
 
-架構：Input → Embedding → Attention → BiLSTM(N層) → Classifier
+架構：Input → Embedding → Attention → Gate Fusion → BiLSTM(N層) → Classifier
+
+改進重點（v2.0）：
+- 使用 Gate Mechanism 智能融合原始 embedding 和 aspect context
+- 不再將序列壓縮成單一向量，保留序列結構和多樣性
+- BiLSTM 能學習到有意義的時序模式
 
 特點：
-- Attention 機制先作用在詞嵌入層輸出
-- 將注意力加權後的表示輸入多層 BiLSTM
+- Attention 機制先作用在詞嵌入層輸出，提取 aspect 相關資訊
+- Gate 機制動態決定每個位置保留多少原始資訊 vs. aspect 資訊
+- 多層 BiLSTM 對融合後的序列進行深層編碼
 - 取最後一層 BiLSTM 的最終隱藏狀態作為句子表示
 - 適合先聚焦重要詞彙再進行深層編碼
 """
@@ -34,11 +40,12 @@ class PreFusionModel(nn.Module):
         vocab_size (int): 詞彙表大小
         embedding_dim (int): 詞嵌入維度，默認 300
         hidden_size (int): LSTM 隱藏層大小，默認 128
-        num_lstm_layers (int): BiLSTM 層數（2/3/4/5），默認 2
+        num_lstm_layers (int): LSTM 層數（2/3/4/5），默認 2
         num_classes (int): 分類類別數，默認 3（正面、負面、中性）
         dropout (float): Dropout 比例，默認 0.3
         pretrained_embeddings (torch.Tensor, optional): 預訓練詞嵌入矩陣
         freeze_embeddings (bool): 是否凍結詞嵌入層，默認 False
+        bidirectional (bool): 是否使用雙向 LSTM，默認 True
     """
 
     def __init__(
@@ -50,7 +57,8 @@ class PreFusionModel(nn.Module):
         num_classes=3,
         dropout=0.3,
         pretrained_embeddings=None,
-        freeze_embeddings=False
+        freeze_embeddings=False,
+        bidirectional=True
     ):
         super(PreFusionModel, self).__init__()
 
@@ -64,6 +72,8 @@ class PreFusionModel(nn.Module):
         self.num_lstm_layers = num_lstm_layers
         self.num_classes = num_classes
         self.dropout = dropout
+        self.bidirectional = bidirectional
+        self.lstm_output_size = hidden_size * 2 if bidirectional else hidden_size
 
         # 1. 詞嵌入層
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
@@ -86,17 +96,24 @@ class PreFusionModel(nn.Module):
         nn.init.zeros_(self.attention_W.bias)
         nn.init.xavier_uniform_(self.attention_v.weight)
 
-        # 3. 多層 BiLSTM（輸入是 embedding_dim，不是 hidden_size * 2）
+        # 2.5 Gate mechanism（用於融合原始 embedding 和 context）
+        # 這是關鍵改進：不是直接用 context 替換，而是智能融合
+        self.gate_linear = nn.Linear(embedding_dim, embedding_dim)
+        nn.init.xavier_uniform_(self.gate_linear.weight)
+        nn.init.zeros_(self.gate_linear.bias)
+
+        # 3. LSTM 層（輸入是 embedding_dim，支援單向/雙向）
         self.bilstm = BiLSTMLayer(
             input_size=embedding_dim,
             hidden_size=hidden_size,
             num_layers=num_lstm_layers,
-            dropout=dropout if num_lstm_layers > 1 else 0.0
+            dropout=dropout if num_lstm_layers > 1 else 0.0,
+            bidirectional=bidirectional
         )
 
-        # 4. 分類器（輸入是 BiLSTM 最終狀態：hidden_size * 2）
+        # 4. 分類器（輸入是 LSTM 最終狀態：根據 bidirectional 決定）
         self.classifier = Classifier(
-            input_size=hidden_size * 2,
+            input_size=self.lstm_output_size,
             num_classes=num_classes,
             dropout=dropout
         )
@@ -160,25 +177,44 @@ class PreFusionModel(nn.Module):
         # context_vector: [batch_size, embedding_dim]
         # attention_weights: [batch_size, seq_len]
 
-        # 3. 將 context vector 擴展為序列並輸入 BiLSTM
-        # 方法：將 context_vector 複製為與原始序列相同長度
-        # 這樣可以讓 BiLSTM 在每個位置都能看到全局的 aspect 信息
+        # 3. Aspect-Aware Enhancement（關鍵改進）
+        # 不是直接替換，而是用 gate 機制融合原始 embedding 和 aspect context
         seq_len = input_ids.size(1)
-        context_sequence = context_vector.unsqueeze(1).expand(-1, seq_len, -1)
-        # context_sequence: [batch_size, seq_len, embedding_dim]
 
-        # 4. 多層 BiLSTM 編碼
-        lstm_output, (h_n, c_n) = self.bilstm(context_sequence)
-        # lstm_output: [batch_size, seq_len, hidden_size * 2]
-        # h_n: [num_layers * 2, batch_size, hidden_size]
+        # 將 context_vector 擴展到序列長度
+        context_expanded = context_vector.unsqueeze(1).expand(-1, seq_len, -1)
+        # context_expanded: [batch_size, seq_len, embedding_dim]
+
+        # 計算 gate（決定保留多少原始資訊 vs. aspect 資訊）
+        # gate 值在 [0, 1] 之間，由原始 embedding 決定
+        gate = torch.sigmoid(self.gate_linear(embeddings))
+        # gate: [batch_size, seq_len, embedding_dim]
+
+        # 融合：保留原始序列結構 + 加入 aspect 資訊
+        # gate=1: 完全保留原始 embedding
+        # gate=0: 完全使用 aspect context
+        # 實際上 gate 會學習在不同位置使用不同的混合比例
+        enhanced_embeddings = gate * embeddings + (1 - gate) * context_expanded
+        # enhanced_embeddings: [batch_size, seq_len, embedding_dim]
+        # 優勢：保留了序列的多樣性，同時融入了 aspect 相關的全局資訊
+
+        # 4. LSTM 編碼（現在輸入是有意義的序列）
+        lstm_output, (h_n, c_n) = self.bilstm(enhanced_embeddings)
+        # lstm_output: [batch_size, seq_len, lstm_output_size]
+        # h_n: [num_layers * num_directions, batch_size, hidden_size]
 
         # 5. 取最後一層的最終隱藏狀態
-        # h_n 的形狀是 [num_layers * 2, batch_size, hidden_size]
-        # 最後一層的前向和後向狀態在 h_n 的最後兩個位置
-        forward_hidden = h_n[-2, :, :]  # [batch_size, hidden_size]
-        backward_hidden = h_n[-1, :, :]  # [batch_size, hidden_size]
-        final_hidden = torch.cat([forward_hidden, backward_hidden], dim=1)
-        # final_hidden: [batch_size, hidden_size * 2]
+        if self.bidirectional:
+            # h_n 的形狀是 [num_layers * 2, batch_size, hidden_size]
+            # 最後一層的前向和後向狀態在 h_n 的最後兩個位置
+            forward_hidden = h_n[-2, :, :]  # [batch_size, hidden_size]
+            backward_hidden = h_n[-1, :, :]  # [batch_size, hidden_size]
+            final_hidden = torch.cat([forward_hidden, backward_hidden], dim=1)
+            # final_hidden: [batch_size, hidden_size * 2]
+        else:
+            # 單向 LSTM：h_n 的形狀是 [num_layers, batch_size, hidden_size]
+            # 取最後一層
+            final_hidden = h_n[-1, :, :]  # [batch_size, hidden_size]
 
         # 6. 分類
         logits = self.classifier(final_hidden)  # [batch_size, num_classes]
@@ -212,6 +248,7 @@ class PreFusionModel(nn.Module):
             'embedding_dim': self.embedding_dim,
             'hidden_size': self.hidden_size,
             'num_lstm_layers': self.num_lstm_layers,
+            'bidirectional': self.bidirectional,
             'num_classes': self.num_classes,
             'dropout': self.dropout,
             'total_params': total_params,
@@ -226,13 +263,15 @@ class PreFusionModel(nn.Module):
         打印模型信息
         """
         info = self.get_model_info()
+        lstm_type = "雙向" if info['bidirectional'] else "單向"
         print("\n" + "="*70)
-        print(f"模型類型: {info['model_type']} ({info['num_lstm_layers']} 層 BiLSTM)")
+        print(f"模型類型: {info['model_type']} ({info['num_lstm_layers']} 層 {lstm_type}LSTM)")
         print("="*70)
         print(f"詞彙表大小:      {info['vocab_size']:,}")
         print(f"詞嵌入維度:      {info['embedding_dim']}")
         print(f"隱藏層大小:      {info['hidden_size']}")
-        print(f"BiLSTM 層數:     {info['num_lstm_layers']}")
+        print(f"LSTM 層數:       {info['num_lstm_layers']}")
+        print(f"LSTM 類型:       {lstm_type}")
         print(f"分類類別數:      {info['num_classes']}")
         print(f"Dropout:         {info['dropout']}")
         print("-"*70)

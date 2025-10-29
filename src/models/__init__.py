@@ -6,14 +6,16 @@
 
 from .components import BiLSTMLayer, AttentionLayer, Classifier
 from .baseline import BaselineModel
-from .aspect_level import AspectLevelModel, AspectPositionEmbedding, AspectAwareAttention
+from .baseline_no_attention import BaselineNoAttention
+from .pre_fusion import PreFusionModel
+from .post_fusion import PostFusionModel
 
 __all__ = [
     'BiLSTMLayer',
     'AttentionLayer',
     'Classifier',
     'BaselineModel',
-    'AspectLevelModel',
-    'AspectPositionEmbedding',
-    'AspectAwareAttention'
+    'BaselineNoAttention',
+    'PreFusionModel',
+    'PostFusionModel'
 ]

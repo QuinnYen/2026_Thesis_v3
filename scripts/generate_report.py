@@ -7,6 +7,7 @@
 import sys
 from pathlib import Path
 import json
+from datetime import datetime
 
 # 設定專案根目錄
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -27,7 +28,7 @@ def generate_report():
     report_lines.append("完整實驗報告")
     report_lines.append("=" * 80)
     report_lines.append("")
-    report_lines.append(f"生成時間: {Path(__file__).stat().st_mtime}")
+    report_lines.append(f"生成時間: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     report_lines.append("")
 
     base_experiment_dir = BASE_DIR / "outputs" / "experiments" / "aspect_level_v2"

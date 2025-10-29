@@ -1,14 +1,14 @@
 """
 資料處理模組
-包含 SemEval 資料集的解析、統計和預處理功能
+包含清理後資料的載入和詞向量處理功能
 """
 
-from .xml_parser import SemEvalDataset, SemEvalDatasetLoader
-from .dataset_statistics import DatasetStatistics
+from .cleaned_data_loader import create_cleaned_data_loaders, get_vocab_words
+from .embedding_loader import load_glove_embeddings
 
 __all__ = [
-    'SemEvalDataset',
-    'SemEvalDatasetLoader',
-    'DatasetStatistics'
+    'create_cleaned_data_loaders',
+    'get_vocab_words',
+    'load_glove_embeddings'
 ]
 

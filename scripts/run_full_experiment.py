@@ -120,10 +120,22 @@ def step2_train_models(models='all'):
         print(f"  - {dataset}")
     print()
 
-    # 使用 train_all_datasets.py 腳本
+    # 使用新的統一訓練腳本
+    cmd = ["python", "scripts/train_unified.py", "--use_config_datasets"]
+
+    # 根據 models 參數決定要訓練哪些模型
+    if models == 'all':
+        cmd.extend(["--models", "baseline", "prefusion", "postfusion"])
+    elif models == 'baseline':
+        cmd.extend(["--model", "baseline"])
+    elif models == 'prefusion':
+        cmd.extend(["--model", "prefusion"])
+    elif models == 'postfusion':
+        cmd.extend(["--model", "postfusion"])
+
     success = run_command(
         f"在所有數據集上訓練模型（模型類型: {models}）",
-        ["python", "scripts/train_all_datasets.py", "--model", models],
+        cmd,
         timeout=14400  # 4 小時
     )
 

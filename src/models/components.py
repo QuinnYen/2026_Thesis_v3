@@ -14,41 +14,48 @@ import torch.nn.functional as F
 
 class BiLSTMLayer(nn.Module):
     """
-    雙向 LSTM 層
+    LSTM 層（支援雙向和單向）
 
-    此層實現雙向 LSTM，可以捕捉序列的前向和後向上下文信息。
+    此層實現 LSTM，可以配置為雙向或單向以捕捉序列的上下文信息。
 
     參數:
         input_size (int): 輸入特徵的維度
         hidden_size (int): LSTM 隱藏狀態的維度
         num_layers (int): LSTM 層數
         dropout (float): Dropout 比率，應用於除最後一層外的所有層
+        bidirectional (bool): 是否使用雙向 LSTM，預設為 True
 
     輸入形狀:
         - input: (batch_size, seq_len, input_size)
 
     輸出形狀:
-        - sequence_output: (batch_size, seq_len, hidden_size * 2)
-        - h_n: (num_layers * 2, batch_size, hidden_size)
-        - c_n: (num_layers * 2, batch_size, hidden_size)
+        - 雙向模式 (bidirectional=True):
+          - sequence_output: (batch_size, seq_len, hidden_size * 2)
+          - h_n: (num_layers * 2, batch_size, hidden_size)
+          - c_n: (num_layers * 2, batch_size, hidden_size)
+        - 單向模式 (bidirectional=False):
+          - sequence_output: (batch_size, seq_len, hidden_size)
+          - h_n: (num_layers, batch_size, hidden_size)
+          - c_n: (num_layers, batch_size, hidden_size)
     """
 
-    def __init__(self, input_size, hidden_size, num_layers=1, dropout=0.0):
+    def __init__(self, input_size, hidden_size, num_layers=1, dropout=0.0, bidirectional=True):
         super(BiLSTMLayer, self).__init__()
 
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.dropout = dropout
+        self.bidirectional = bidirectional
 
-        # 定義雙向 LSTM
+        # 定義 LSTM（雙向或單向）
         self.bilstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0,
-            bidirectional=True
+            bidirectional=bidirectional
         )
 
         # 參數初始化
@@ -79,9 +86,15 @@ class BiLSTMLayer(nn.Module):
             input_seq (Tensor): 輸入序列，形狀為 (batch_size, seq_len, input_size)
 
         返回:
-            sequence_output (Tensor): 所有時間步的輸出，形狀為 (batch_size, seq_len, hidden_size * 2)
-            h_n (Tensor): 最後時間步的隱藏狀態，形狀為 (num_layers * 2, batch_size, hidden_size)
-            c_n (Tensor): 最後時間步的細胞狀態，形狀為 (num_layers * 2, batch_size, hidden_size)
+            sequence_output (Tensor): 所有時間步的輸出
+                - 雙向模式: (batch_size, seq_len, hidden_size * 2)
+                - 單向模式: (batch_size, seq_len, hidden_size)
+            h_n (Tensor): 最後時間步的隱藏狀態
+                - 雙向模式: (num_layers * 2, batch_size, hidden_size)
+                - 單向模式: (num_layers, batch_size, hidden_size)
+            c_n (Tensor): 最後時間步的細胞狀態
+                - 雙向模式: (num_layers * 2, batch_size, hidden_size)
+                - 單向模式: (num_layers, batch_size, hidden_size)
         """
         # LSTM 前向傳播
         sequence_output, (h_n, c_n) = self.bilstm(input_seq)
@@ -101,15 +114,15 @@ class AttentionLayer(nn.Module):
         context = Σ(α_i * h_i)
 
     參數:
-        hidden_size (int): LSTM 隱藏狀態的維度（雙向 LSTM 輸出維度的一半）
+        hidden_size (int): LSTM 輸出的維度（對雙向 LSTM 為 hidden_size * 2，單向為 hidden_size）
         attention_size (int): 注意力層的維度，預設與 hidden_size 相同
 
     輸入形狀:
-        - lstm_outputs: (batch_size, seq_len, hidden_size * 2)
+        - lstm_outputs: (batch_size, seq_len, lstm_output_size)
         - aspect_mask: (batch_size, seq_len) 布林遮罩，True 表示面向詞位置
 
     輸出形狀:
-        - attention_output: (batch_size, hidden_size * 2)
+        - attention_output: (batch_size, lstm_output_size)
         - attention_weights: (batch_size, seq_len)
     """
 
@@ -117,7 +130,7 @@ class AttentionLayer(nn.Module):
                  penalty_weight=5.0, context_window=2, normalize_penalty=False):
         super(AttentionLayer, self).__init__()
 
-        self.hidden_size = hidden_size * 2  # 雙向 LSTM 輸出維度
+        self.hidden_size = hidden_size  # LSTM 輸出維度（由調用方決定是否 * 2）
         self.attention_size = attention_size if attention_size is not None else hidden_size
 
         # 軟遮罩參數
@@ -146,12 +159,12 @@ class AttentionLayer(nn.Module):
         前向傳播
 
         參數:
-            lstm_outputs (Tensor): LSTM 輸出，形狀為 (batch_size, seq_len, hidden_size * 2)
+            lstm_outputs (Tensor): LSTM 輸出，形狀為 (batch_size, seq_len, lstm_output_size)
             aspect_mask (Tensor): 面向詞遮罩，形狀為 (batch_size, seq_len)，
                                  True 表示面向詞位置，False 表示非面向詞位置
 
         返回:
-            attention_output (Tensor): 注意力加權的上下文向量，形狀為 (batch_size, hidden_size * 2)
+            attention_output (Tensor): 注意力加權的上下文向量，形狀為 (batch_size, lstm_output_size)
             attention_weights (Tensor): 注意力權重，形狀為 (batch_size, seq_len)
         """
         # 計算注意力分數: e_i = v^T * tanh(W * h_i + b)

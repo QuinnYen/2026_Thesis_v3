@@ -29,11 +29,12 @@ class PostFusionModel(nn.Module):
         vocab_size (int): 詞彙表大小
         embedding_dim (int): 詞嵌入維度，默認 300
         hidden_size (int): LSTM 隱藏層大小，默認 128
-        num_lstm_layers (int): BiLSTM 層數（2/3/4/5），默認 2
+        num_lstm_layers (int): LSTM 層數（2/3/4/5），默認 2
         num_classes (int): 分類類別數，默認 3（正面、負面、中性）
         dropout (float): Dropout 比例，默認 0.3
         pretrained_embeddings (torch.Tensor, optional): 預訓練詞嵌入矩陣
         freeze_embeddings (bool): 是否凍結詞嵌入層，默認 False
+        bidirectional (bool): 是否使用雙向 LSTM，默認 True
     """
 
     def __init__(
@@ -45,7 +46,8 @@ class PostFusionModel(nn.Module):
         num_classes=3,
         dropout=0.3,
         pretrained_embeddings=None,
-        freeze_embeddings=False
+        freeze_embeddings=False,
+        bidirectional=True
     ):
         super(PostFusionModel, self).__init__()
 
@@ -59,6 +61,8 @@ class PostFusionModel(nn.Module):
         self.num_lstm_layers = num_lstm_layers
         self.num_classes = num_classes
         self.dropout = dropout
+        self.bidirectional = bidirectional
+        self.lstm_output_size = hidden_size * 2 if bidirectional else hidden_size
 
         # 1. 詞嵌入層
         self.embedding = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
@@ -67,23 +71,23 @@ class PostFusionModel(nn.Module):
             if freeze_embeddings:
                 self.embedding.weight.requires_grad = False
 
-        # 2. 多層 BiLSTM
+        # 2. LSTM 層（支援單向/雙向）
         # 使用現有的 BiLSTMLayer，它已經支持多層
         self.bilstm = BiLSTMLayer(
             input_size=embedding_dim,
             hidden_size=hidden_size,
             num_layers=num_lstm_layers,
-            dropout=dropout if num_lstm_layers > 1 else 0.0  # 單層不需要 dropout
+            dropout=dropout if num_lstm_layers > 1 else 0.0,  # 單層不需要 dropout
+            bidirectional=bidirectional
         )
 
         # 3. Attention 層（只作用在最後一層的輸出）
-        # 注意：AttentionLayer 會自動處理 BiLSTM 的雙向輸出（hidden_size * 2）
-        # 所以這裡傳入的是 hidden_size，不是 hidden_size * 2
-        self.attention = AttentionLayer(hidden_size)
+        # 注意：AttentionLayer 現在根據 bidirectional 處理不同維度
+        self.attention = AttentionLayer(self.lstm_output_size)
 
-        # 4. 分類器
+        # 4. 分類器（輸入維度根據 bidirectional 決定）
         self.classifier = Classifier(
-            input_size=hidden_size * 2,
+            input_size=self.lstm_output_size,
             num_classes=num_classes,
             dropout=dropout
         )
@@ -149,6 +153,7 @@ class PostFusionModel(nn.Module):
             'embedding_dim': self.embedding_dim,
             'hidden_size': self.hidden_size,
             'num_lstm_layers': self.num_lstm_layers,
+            'bidirectional': self.bidirectional,
             'num_classes': self.num_classes,
             'dropout': self.dropout,
             'total_params': total_params,
@@ -163,13 +168,15 @@ class PostFusionModel(nn.Module):
         打印模型信息
         """
         info = self.get_model_info()
+        lstm_type = "雙向" if info['bidirectional'] else "單向"
         print("\n" + "="*70)
-        print(f"模型類型: {info['model_type']} ({info['num_lstm_layers']} 層 BiLSTM)")
+        print(f"模型類型: {info['model_type']} ({info['num_lstm_layers']} 層 {lstm_type}LSTM)")
         print("="*70)
         print(f"詞彙表大小:      {info['vocab_size']:,}")
         print(f"詞嵌入維度:      {info['embedding_dim']}")
         print(f"隱藏層大小:      {info['hidden_size']}")
-        print(f"BiLSTM 層數:     {info['num_lstm_layers']}")
+        print(f"LSTM 層數:       {info['num_lstm_layers']}")
+        print(f"LSTM 類型:       {lstm_type}")
         print(f"分類類別數:      {info['num_classes']}")
         print(f"Dropout:         {info['dropout']}")
         print("-"*70)

@@ -47,11 +47,15 @@ DATASET_PATHS = {
 BASELINE_CONFIG = {
     "num_epochs": 30,
     "batch_size": 32,
-    "learning_rate": 1e-5,
+    "learning_rate": 1e-3,       # 調高學習率：1e-5 -> 1e-3
     "warmup_steps": 100,
     "max_length": 128,
-    "dropout": 0.1,
+    "dropout": 0.3,              # 調高 dropout：0.1 -> 0.3
     "weight_decay": 0.01,
+    # 詞向量配置
+    "use_pretrained_embeddings": True,  # 啟用 GloVe 預訓練詞向量
+    "freeze_embeddings": False,         # 是否凍結詞向量（False=微調）
+    "oov_strategy": "random",           # OOV 處理策略: 'random', 'zeros', 'mean'
     # 軟遮罩配置（Soft Masking + Context Window）
     "use_soft_mask": True,       # 啟用軟遮罩（False=硬遮罩）
     "penalty_weight": 5.0,       # 距離懲罰強度（建議範圍: 3-10）
@@ -100,15 +104,19 @@ SOFT_MASK_EXPERIMENTS = {
 
 # Pre-Fusion 配置
 PREFUSION_CONFIG = {
-    "layers": [2],  # 要訓練的層數列表，例如 [2, 3, 4]
+    "layers": [2, 3, 4, 5],  # 訓練 2-5 層（與 Post-Fusion 一致）
     "num_epochs": 30,
     "batch_size": 32,
-    "learning_rate": 1e-5,
+    "learning_rate": 1e-3,  # 調高學習率：1e-5 -> 1e-3
     "warmup_steps": 100,
     "max_length": 128,
-    "dropout": 0.1,
+    "dropout": 0.3,  # 調高 dropout：0.1 -> 0.3
     "weight_decay": 0.01,
-    "auto_select_best": True,  # 自動選擇最佳配置
+    "auto_select_best": False,  # 關閉自動模式，訓練所有層數
+    # 詞向量配置
+    "use_pretrained_embeddings": True,  # 啟用 GloVe
+    "freeze_embeddings": False,
+    "oov_strategy": "random",
 }
 
 # Post-Fusion 配置
@@ -116,11 +124,15 @@ POSTFUSION_CONFIG = {
     "layers": [2, 3, 4, 5],  # 要訓練的層數列表
     "num_epochs": 30,
     "batch_size": 32,
-    "learning_rate": 1e-5,
+    "learning_rate": 1e-3,  # 調高學習率：1e-5 -> 1e-3
     "warmup_steps": 100,
     "max_length": 128,
-    "dropout": 0.1,
+    "dropout": 0.3,  # 調高 dropout：0.1 -> 0.3
     "weight_decay": 0.01,
+    # 詞向量配置
+    "use_pretrained_embeddings": True,  # 啟用 GloVe
+    "freeze_embeddings": False,
+    "oov_strategy": "random",
 }
 
 # ============================================================================

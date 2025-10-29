@@ -186,6 +186,23 @@ def build_vocab_from_csv(csv_paths, min_freq=2):
     return vocab
 
 
+def get_vocab_words(vocab):
+    """
+    從 vocab 字典獲取詞彙列表（按 ID 排序）
+
+    Args:
+        vocab: 詞彙表字典 {word: id}
+
+    Returns:
+        vocab_words: 詞彙列表（按 ID 排序）
+    """
+    # 按 ID 排序，返回詞彙列表
+    vocab_words = [''] * len(vocab)
+    for word, idx in vocab.items():
+        vocab_words[idx] = word
+    return vocab_words
+
+
 def compute_class_weights(train_dataset, num_classes=3):
     """
     計算類別權重（用於處理不平衡）
