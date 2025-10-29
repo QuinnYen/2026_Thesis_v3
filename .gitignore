@@ -3,3 +3,10 @@
 /env
 /outputs
 nul
+
+# Python 緩存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
